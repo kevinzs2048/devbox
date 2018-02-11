@@ -1,0 +1,12 @@
+- username: 'admin'
+  project_name: 'admin'
+  tenant_name: 'admin'
+  password: 'JQs6cPwF6tU1fHjLsmzxNvya7eXD0XGhX8HdwcdS'
+
+# If run swift, need below
+- username: 'swiftop'
+  tenant_name: 'admin'
+  password: 'a_big_secret'
+  roles:
+          - '_member_'
+          - 'ResellerAdmin'
