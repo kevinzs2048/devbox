@@ -31,7 +31,7 @@ func main() {
 		return
 	}
 	fmt.Println(opts)
-	ret := capsules.Get(client, "871966da-386d-4a76-bc2a-3cd0032dc267")
+	ret := capsules.Get(client, "0f3b3859-c7ef-4b0a-96af-a34dbfd6c744")
 	server, id := ret.Extract()
 	fmt.Println("====================")
 	fmt.Println(id)
