@@ -1,0 +1,67 @@
+# use "-" because that the fields have many items
+capsuleVersion: beta
+kind: capsule
+metadata:
+  name: template
+  labels:
+    app: web
+    app1: web1
+restartPolicy: Always
+spec:
+  containers:
+  - image: ubuntu
+    command:
+      - "/bin/bash"
+    imagePullPolicy: ifnotpresent
+    workDir: /root
+    ports:
+      - name: nginx-port
+        containerPort: 80
+        hostPort: 80
+        protocol: TCP
+    resources:
+      requests:
+        cpu: 1
+        memory: 1024
+    env:
+      ENV1: /usr/local/bin
+      ENV2: /usr/bin
+    volumeMounts:
+    - name: volume01
+      mountPath: /data1
+      readOnly: True
+  - image: centos
+    command:
+      - "/bin/bash"
+    args:
+      - "-c"
+      - "\"while true; do echo hello world; sleep 1; done\""
+    imagePullPolicy: ifnotpresent
+    workDir: /root
+    ports:
+      - name: nginx-port
+        containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - name: mysql-port
+        containerPort: 3306
+        hostPort: 3306
+        protocol: TCP
+    resources:
+      requests:
+        cpu: 1
+        memory: 1024
+    env:
+      ENV2: /usr/bin/
+    volumeMounts:
+    - name: volume02
+      mountPath: /data2
+  volumes:
+  - name: volume01
+    cinder:
+      size: 5
+      autoRemove: True
+  - name: volume02
+    cinder:
+      size: 5
+      autoRemove: True
