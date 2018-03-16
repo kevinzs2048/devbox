@@ -38,12 +38,19 @@ func (t *TE) Parse() {
 			fmt.Printf("===================")
 		}
 	}
-	fmt.Printf("-------t.validate------------")
+	fmt.Printf("\r\n-------t.validate------------\r\n")
 	fmt.Printf("%s", t)
 	fmt.Printf("%s", t.Validate())
-	fmt.Printf("-----------------------------")
+	fmt.Printf("\r\n--------Mission finished------------\r\n")
 }
 
+func (t *TE) ParseNo() {
+	if jerr := json.Unmarshal(t.Bin, &t.Parsed); jerr != nil {
+		if yerr := yaml.Unmarshal(t.Bin, &t.Parsed); yerr != nil {
+			fmt.Printf("%s", yerr)
+		}
+	}
+}
 // Validate validates the contents of TE
 func (t *TE) Validate() error {
 	return nil
@@ -110,9 +117,47 @@ const ValidJSONTemplate = `
 }
 `
 
+// ValidYAMLTemplate is a valid OpenStack Heat template in YAML format
+const ValidYAMLTemplate = `
+capsuleVersion: beta
+kind: capsule
+metadata:
+  name: template
+  labels:
+    app: web
+    app1: web1
+restartPolicy: Always
+spec:
+  containers:
+  - image: ubuntu
+    command:
+      - "/bin/bash"
+    imagePullPolicy: ifnotpresent
+    workDir: /root
+    ports:
+      - name: nginx-port
+        containerPort: 80
+        hostPort: 80
+        protocol: TCP
+    resources:
+      requests:
+        cpu: 1
+        memory: 1024
+    env:
+      ENV1: /usr/local/bin
+      ENV2: /usr/bin
+`
+
 func main() {
 	templateJSON := new(Template)
 	templateJSON.Bin = []byte(ValidJSONTemplate)
+	templateJSON.ParseNo()
+	fmt.Printf("%s", templateJSON.Parsed)
+        fmt.Printf("\r\n-----------------------------------\r\n")
+
+        templateJSON = new(Template)
+	templateJSON.Bin = []byte(ValidYAMLTemplate)
 	templateJSON.Parse()
+	fmt.Printf("%s", templateJSON.Parsed)
 }
 
