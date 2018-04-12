@@ -148,16 +148,64 @@ spec:
       ENV2: /usr/bin
 `
 
+// ValidJSONTemplateParsed is the expected parsed version of ValidJSONTemplate
+var ValidJSONTemplateParsed = map[string]interface{}{
+	"capsuleVersion": "beta",
+	"kind": "capsule",
+	"restartPolicy": "Always",
+	"metadata": map[string]interface{}{
+		"name": "template",
+		"label": map[string]string{
+			"app":  "web",
+			"app1": "web1",
+		},
+	},
+	"spec": map[string]interface{}{
+		"container": []map[string]interface{}{
+			map[string]interface{}{
+				"image": "ubuntu",
+				"command": []string{
+					"\"/bin/bash\"",
+				},
+				"imagePullPolicy": "ifnotpresent",
+				"workDir": "/root",
+				"ports": []map[string]interface{}{
+					map[string]interface{}{
+						"name":          "nginx-port",
+						"containerPort": 80,
+						"hostPort":      80,
+						"protocol":      "TCP",
+					},
+				},
+				"resources": map[string]interface{}{
+					"requests": map[string]interface{}{
+						"cpu":    1,
+						"memory": 1024,
+					},
+				},
+				"env": map[string]string{
+					"ENV1": "/usr/local/bin",
+					"ENV2": "/usr/bin",
+				},
+			},
+		},
+	},
+}
+
 func main() {
-	templateJSON := new(Template)
-	templateJSON.Bin = []byte(ValidJSONTemplate)
-	templateJSON.ParseNo()
-	fmt.Printf("%s", templateJSON.Parsed)
+//	templateJSON := new(Template)
+//	templateJSON.Bin = []byte(ValidJSONTemplate)
+//	templateJSON.ParseNo()
+//	fmt.Printf("%s", templateJSON.Parsed)
         fmt.Printf("\r\n-----------------------------------\r\n")
 
-        templateJSON = new(Template)
+        templateJSON := new(Template)
 	templateJSON.Bin = []byte(ValidYAMLTemplate)
 	templateJSON.Parse()
+        fmt.Printf("\r\n-----------------------------------\r\n")
 	fmt.Printf("%s", templateJSON.Parsed)
+        fmt.Printf("\r\n-----------------------------------\r\n")
+        fmt.Printf("%s", ValidJSONTemplateParsed)
+        fmt.Printf("\r\n-----------------------------------\r\n")
 }
 
