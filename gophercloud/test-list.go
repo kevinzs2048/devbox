@@ -2,9 +2,9 @@ package main
 
 import (
   "fmt"
-  "encoding/json"
 
   "github.com/gophercloud/gophercloud"
+  "github.com/gophercloud/gophercloud/pagination"
   "github.com/gophercloud/gophercloud/openstack"
   "github.com/gophercloud/gophercloud/openstack/container/v1/capsules"
 )
@@ -30,22 +30,25 @@ func main() {
 		fmt.Errorf("Get zun client failed: %v", err)
 		return
 	}
-	allPages, err := capsules.List(client, nil).AllPages()
-	if err != nil {
-                fmt.Printf("===============")
-                fmt.Printf("============%s===\r\n", err)
-		fmt.Errorf("Unable to retrieve capsules: %v", err)
-                return
-	}
-	allCapsules, err := capsules.ExtractCapsules(allPages)
-	if err != nil {
-		fmt.Errorf("Unable to extract capsules: %v", err)
-                return
-	}
+	pager := capsules.List(client, nil)
+        fmt.Printf("======Pager========: %s", pager)
+	err = pager.EachPage(func(page pagination.Page) (bool, error) {
+                fmt.Printf("======Page========")
+		CapsuleList, err := capsules.ExtractCapsules(page)
+                if err != nil {
+		        fmt.Printf("======get capsule list failed========")
+		        return false, err
+	        }
 
-	for _, capsule := range allCapsules {
-	        b, _ := json.MarshalIndent(capsule, "", "  ")
-                fmt.Printf("%s", string(b))
+		for _, m := range CapsuleList {
+		        fmt.Printf("====%s=====", m.UUID)
+                }
+                return true, nil
+        })
+
+        if err != nil {
+                fmt.Printf("======Error: %s=======\r\n", err)
+                return
         }
 }
 
