@@ -13,7 +13,7 @@ func main() {
 		IdentityEndpoint: "http://10.169.41.188/identity",
 		Username: "admin",
 		Password: "password",
-		TenantID: "4036ad025daf4fcbb2c0cde3d6e59073",
+		TenantID: "01821bd38f2f474489491adb0da7efaf",
 		DomainID: "default",
 	}
 	provider, err := openstack.AuthenticatedClient(opts)
@@ -31,12 +31,14 @@ func main() {
 		return
 	}
 	fmt.Println(opts)
-	ret := capsules.Get(client, "0f3b3859-c7ef-4b0a-96af-a34dbfd6c744")
-	server, id := ret.Extract()
+	med := capsules.Get(client, "capsule-")
+	capsule, err := med.Extract()
 	fmt.Println("====================")
-	fmt.Println(id)
-	fmt.Println(ret)
+	fmt.Println(med)
 	fmt.Println("====================")
-	fmt.Println(server)
+	fmt.Println(capsule)
+	fmt.Println("====================")
+	fmt.Println(err)
+	fmt.Println("====================")
 }
 
