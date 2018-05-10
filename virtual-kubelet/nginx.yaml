@@ -10,3 +10,8 @@ spec:
     - containerPort: 80
   nodeSelector:
     foo: bar
+  tolerations:
+  - key: "key"
+    operator: "Equal"
+    value: "value"
+    effect: "NoSchedule"
