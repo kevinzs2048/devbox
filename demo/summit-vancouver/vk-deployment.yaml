@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: virtual-kubelet-deployment
+  labels:
+    app: virtual-kubelet-node
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: virtual-kubelet-node
+  template:
+    metadata:
+      labels:
+        app: virtual-kubelet-node
+    spec:
+      containers:
+      - name: virtual-kubelet
+        image: zhaoshuaiabc/virtual-kubelet:latest
+        args: ["--provider", "openstack", "--taint", "vknode"]
+        workingDir: /
+        volumeMounts:
+        - mountPath: /.kube
+          name: kube-config
+      volumes:
+      - name: kube-config
+        hostPath:
+          path: /opt/stack/.kube
+
