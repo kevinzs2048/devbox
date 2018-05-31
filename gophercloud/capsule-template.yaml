@@ -6,8 +6,8 @@ metadata:
   labels:
     app: web
     app1: web1
-restartPolicy: Always
 spec:
+  restartPolicy: Always
   containers:
   - image: ubuntu
     command:

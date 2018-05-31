@@ -4,8 +4,8 @@ metadata:
   name: capsule-demo
   labels:
     app: test
-restartPolicy: Always
 spec:
+  restartPolicy: Always
   containers:
   - image: nginx
     imagePullPolicy: ifnotpresent
