@@ -85,7 +85,11 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
         /*
          * ESR_ELx_WNR->ISS表中的WnR，值为1则说明写内存区域发生错误；值为0说明读内存区域发生错误
          * 若异常是EL0中的指令异常，说明这个进程地址空间具有可执行权限
-         * ESR_ELx_CM 显示 内容待确认
+         * ESR_ELx_CM 显示为Cache maintenance 信息。
+         * arm64架构中，WNR总会被设置为1： db6f41063cbdb58b14846e600e6bc3f4e4c2e888
+         * 但是指令被认为是Read操作：log信息摘录:The WnR bit, usually used to distinguish between
+         * faulting loads and stores, always reads as 1 and (slightly confusingly) the instructions
+         * are treated as reads by the architecture.
          */
 		vm_flags = VM_WRITE;
 		mm_flags |= FAULT_FLAG_WRITE;
@@ -918,6 +922,19 @@ struct vm_area_struct {
 } __randomize_layout;
 ```
 
+```c
+/*
+* vm_flags in vm_area_struct, see mm_types.h.
+* When changing, update also include/trace/events/mmflags.h
+  */
+#define VM_NONE		0x00000000
+
+#define VM_READ		0x00000001	/* currently active flags */
+#define VM_WRITE	0x00000002
+#define VM_EXEC		0x00000004
+#define VM_SHARED	0x00000008
+
+```
 
 
 Reference
