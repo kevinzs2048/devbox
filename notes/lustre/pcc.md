@@ -263,6 +263,105 @@ static void __pcc_layout_invalidate(struct pcc_inode *pcci)
 
 ```
 
+
+```c
+int pcc_page_mkwrite(struct vm_area_struct *vma, struct vm_fault *vmf,
+bool *cached)
+{
+    struct page *page = vmf->page;
+    struct mm_struct *mm = vma->vm_mm;
+    struct file *file = vma->vm_file;
+    struct inode *inode = file_inode(file);
+    struct ll_file_data *fd = file->private_data;
+    struct file *pcc_file = fd->fd_pcc_file.pccf_file;
+    struct vm_operations_struct *pcc_vm_ops = vma->vm_private_data;
+    int rc;
+
+	ENTRY;
+
+    // 没有pcc file，或者没有pcc ops对象，说明pcc cached不支持
+	if (!pcc_file || !pcc_vm_ops) {
+		*cached = false;
+		RETURN(0);
+	}
+
+    // 没有page_mkwrite操作，同时page->mapping == pcc_file->f_mapping
+	if (!pcc_vm_ops->page_mkwrite &&
+	    page->mapping == pcc_file->f_mapping) {
+		CDEBUG(D_MMAP,
+		       "%s: PCC backend fs not support ->page_mkwrite()\n",
+		       ll_i2sbi(inode)->ll_fsname);
+		pcc_ioctl_detach(inode, PCC_DETACH_OPT_UNCACHE);
+		mmap_read_unlock(mm);
+		*cached = true;
+		RETURN(VM_FAULT_RETRY | VM_FAULT_NOPAGE);
+	}
+	/* Pause to allow for a race with concurrent detach */
+	OBD_FAIL_TIMEOUT(OBD_FAIL_LLITE_PCC_MKWRITE_PAUSE, cfs_fail_val);
+
+	pcc_io_init(inode, PIT_PAGE_MKWRITE, cached);
+	if (!*cached) {
+		/* This happens when the file is detached from PCC after got
+		 * the fault page via ->fault() on the inode of the PCC copy.
+		 * Here it can not simply fall back to normal Lustre I/O path.
+		 * The reason is that the address space of fault page used by
+		 * ->page_mkwrite() is still the one of PCC inode. In the
+		 * normal Lustre ->page_mkwrite() I/O path, it will be wrongly
+		 * handled as the address space of the fault page is not
+		 * consistent with the one of the Lustre inode (though the
+		 * fault page was truncated).
+		 * As the file is detached from PCC, the fault page must
+		 * be released frist, and retry the mmap write (->fault() and
+		 * ->page_mkwrite).
+		 * We use an ugly and tricky method by returning
+		 * VM_FAULT_NOPAGE | VM_FAULT_RETRY to the caller
+		 * __do_page_fault and retry the memory fault handling.
+		 */
+        // 这里判断page的mapping信息是否跟pcc-file mapping信息一直，即pcc detach了但是page_mkwrite的inode还是PCC的，
+        // 并不是Lustre的inode。这里需要有个机制，但不是简单的retry，否则会进入长期持续的无限轮询。
+		if (page->mapping == pcc_file->f_mapping) {
+			*cached = true;
+			mmap_read_unlock(mm);
+			RETURN(VM_FAULT_RETRY | VM_FAULT_NOPAGE);
+		}
+
+		RETURN(0);
+	}
+
+	/*
+	 * This fault injection can also be used to simulate -ENOSPC and
+	 * -EDQUOT failure of underlying PCC backend fs.
+	 */
+	if (OBD_FAIL_CHECK(OBD_FAIL_LLITE_PCC_DETACH_MKWRITE)) {
+		pcc_io_fini(inode);
+		pcc_ioctl_detach(inode, PCC_DETACH_OPT_UNCACHE);
+		mmap_read_unlock(mm);
+        CDEBUG(D_CACHE, "============OBD_FAIL_LLITE_PCC_DETACH_MKWRITE===========\n");
+        pcc_mkwrite_pte_c = pte_offset_map(vmf->pmd, vmf->address);
+        pcc_mkwrite_ori_pte_c = *pcc_mkwrite_pte_c;
+
+        if (pte_none(pcc_mkwrite_ori_pte_c)) {
+            CDEBUG(D_CACHE, "===========OBD_FAIL_LLITE_PCC_DETACH_MKWRITE====PTE is NONE================\n");
+        } else {
+            CDEBUG(D_CACHE, "=========OBD_FAIL_LLITE_PCC_DETACH_MKWRITE======PTE is not NONE================\n");
+        }
+		RETURN(VM_FAULT_RETRY | VM_FAULT_NOPAGE);
+	}
+
+	vma->vm_file = pcc_file;
+#ifdef HAVE_VM_OPS_USE_VM_FAULT_ONLY
+	rc = pcc_vm_ops->page_mkwrite(vmf);
+#else
+	rc = pcc_vm_ops->page_mkwrite(vma, vmf);
+#endif
+	vma->vm_file = file;
+
+	pcc_io_fini(inode);
+	RETURN(rc);
+}
+```
+
+
 pcc_io_init函数
 ```C
 // 参数
@@ -745,7 +844,189 @@ page_not_uptodate:
 EXPORT_SYMBOL(filemap_fault);
 ```
 
+错误注入时候的调用流程：
+```c
+	/*
+	 * This fault injection can also be used to simulate -ENOSPC and
+	 * -EDQUOT failure of underlying PCC backend fs.
+	 */
+	if (OBD_FAIL_CHECK(OBD_FAIL_LLITE_PCC_DETACH_MKWRITE)) {
+		pcc_io_fini(inode);
+		pcc_ioctl_detach(inode, PCC_DETACH_OPT_UNCACHE);
+		mmap_read_unlock(mm);
+        RETURN(VM_FAULT_RETRY | VM_FAULT_NOPAGE);
+	}
 
+int pcc_ioctl_detach(struct inode *inode, __u32 opt)
+{
+        
+	struct ll_inode_info *lli = ll_i2info(inode);
+	struct pcc_inode *pcci;
+	bool hsm_remove = false;
+	int rc = 0;
+
+	ENTRY;
+
+	pcc_inode_lock(inode);
+	pcci = lli->lli_pcc_inode;
+    // Log上看，并没有走该逻辑。pcc_inode_has_layout返回1
+	if (!pcci || lli->lli_pcc_state & PCC_STATE_FL_ATTACHING ||
+	    !pcc_inode_has_layout(pcci))
+		GOTO(out_unlock, rc = 0);
+
+	LASSERT(atomic_read(&pcci->pcci_refcount) > 0);
+
+	if (pcci->pcci_type == LU_PCC_READWRITE) {
+        // opt 参数确实为PCC_DETACH_OPT_UNCACHE
+		if (opt == PCC_DETACH_OPT_UNCACHE) {
+			hsm_remove = true;
+			/*
+			 * The file will be removed from PCC, set the flags
+			 * with PCC_DATASET_NONE even the later removal of the
+			 * PCC copy fails.
+			 */
+			lli->lli_pcc_dsflags = PCC_DATASET_NONE;
+		}
+
+		__pcc_layout_invalidate(pcci);
+		pcc_inode_put(pcci);
+	}
+
+out_unlock:
+	pcc_inode_unlock(inode);
+	if (hsm_remove) {
+		const struct cred *old_cred;
+
+		old_cred = override_creds(pcc_super_cred(inode->i_sb));
+		rc = pcc_hsm_remove(inode);
+		revert_creds(old_cred);
+	}
+
+	RETURN(rc);
+}
+
+static int pcc_hsm_remove(struct inode *inode)
+{
+    struct hsm_user_request *hur;
+    __u32 gen;
+    int len;
+    int rc;
+
+    ENTRY;
+
+    // send a restore request to MDT
+    rc = ll_layout_restore(inode, 0, OBD_OBJECT_EOF);
+    if (rc) {
+        CDEBUG(D_CACHE, DFID" RESTORE failure: %d\n",
+        PFID(&ll_i2info(inode)->lli_fid), rc);
+        RETURN(rc);
+    }
+
+    // After IO is finished, this function should be called again to verify 
+    // that layout is not changed during IO time.
+    ll_layout_refresh(inode, &gen);
+
+    len = sizeof(struct hsm_user_request) +
+    sizeof(struct hsm_user_item);
+    OBD_ALLOC(hur, len);
+    if (hur == NULL)
+    RETURN(-ENOMEM);
+
+    hur->hur_request.hr_action = HUA_REMOVE;
+    hur->hur_request.hr_archive_id = 0;
+    hur->hur_request.hr_flags = 0;
+    memcpy(&hur->hur_user_item[0].hui_fid, &ll_i2info(inode)->lli_fid,
+    sizeof(hur->hur_user_item[0].hui_fid));
+    hur->hur_user_item[0].hui_extent.offset = 0;
+    hur->hur_user_item[0].hui_extent.length = OBD_OBJECT_EOF;
+    hur->hur_request.hr_itemcount = 1;
+    rc = obd_iocontrol(LL_IOC_HSM_REQUEST, ll_i2sbi(inode)->ll_md_exp,
+    len, hur, NULL);
+    if (rc)
+        CDEBUG(D_CACHE, DFID" HSM REMOVE failure: %d\n",
+               PFID(&ll_i2info(inode)->lli_fid), rc);
+
+    OBD_FREE(hur, len);
+    RETURN(rc);
+}
+```
+
+
+```c
+// 根据inode找到对应lustre的pcc_inode对象，PCC IO关闭
+static void pcc_io_fini(struct inode *inode)
+{
+    struct pcc_inode *pcci = ll_i2pcci(inode);
+    LASSERT(pcci && atomic_read(&pcci->pcci_active_ios) > 0);
+    //如果原子类型v在减1后变为0，则返回1，否则返回0.
+    //判断pcci上是否还有active_ios,如果只有一个，则唤醒pcci_waitq等待队列上的线程
+    if (atomic_dec_and_test(&pcci->pcci_active_ios)){
+        wake_up(&pcci->pcci_waitq);
+    }
+}
+
+// PCC IO 的初始化
+// 和pcc_io_fini成对使用
+static void pcc_io_init(struct inode *inode, enum pcc_io_type iot, bool *cached)
+{
+    struct pcc_inode *pcci;
+
+    pcc_inode_lock(inode);
+    pcci = ll_i2pcci(inode);
+    
+    // pcc_inode_has_layout: return pcci->pcci_layout_gen != CL_LAYOUT_GEN_NONE; 
+    // 在pcc_inode_init函数中，进行pcci的初始化，初始值为CL_LAYOUT_GEN_NONE
+    // 该标志位修改，使用pcc_layout_gen_set。ll_atomic_open-> pcc_inode_create_fini中调用set为0.
+    // __pcc_layout_invalidate中也会将其置位为CL_LAYOUT_GEN_NONE
+    if (pcci && pcc_inode_has_layout(pcci)) {
+        LASSERT(atomic_read(&pcci->pcci_refcount) > 0);
+        atomic_inc(&pcci->pcci_active_ios);
+        *cached = true;
+    } else {
+        // 如果是刚初始化，会进入此处，进行attach操作。detach的话，会在此进行新的attach，0225重点看一下
+        *cached = false;
+        if (pcc_may_auto_attach(inode, iot)) {
+            (void) pcc_try_auto_attach(inode, cached, iot);
+            if (*cached) {
+                pcci = ll_i2pcci(inode);
+                LASSERT(atomic_read(&pcci->pcci_refcount) > 0);
+                atomic_inc(&pcci->pcci_active_ios);
+            }
+        }
+    }
+    pcc_inode_unlock(inode);
+}
+
+//pcc_inode结构的初始化
+static void pcc_inode_init(struct pcc_inode *pcci, struct ll_inode_info *lli)
+{
+    pcci->pcci_lli = lli;
+    lli->lli_pcc_inode = pcci;
+    atomic_set(&pcci->pcci_refcount, 0);
+    pcci->pcci_type = LU_PCC_NONE;
+    pcci->pcci_layout_gen = CL_LAYOUT_GEN_NONE;
+    atomic_set(&pcci->pcci_active_ios, 0);
+    init_waitqueue_head(&pcci->pcci_waitq);
+}
+
+static inline struct pcc_inode *ll_i2pcci(struct inode *inode)
+{
+    //根据inode，找到ll_inode_info中lli_pcc_inode的地址。因此需要找到该地址在何处被赋值
+    return ll_i2info(inode)->lli_pcc_inode;
+}
+lli_pcc_inode被赋值位置：
+pcc_inode_init函数赋值---> 在pcc_try_auto_attach->pcc_try_datasets_attach->pcc_try_dataset_attach调用
+                     ---> pcc_inode_attach_set-->pcc_inode_create_fini-->ll_atomic_open
+                     ---> pcc_inode_attach_set-->pcc_readwrite_attach ->ll_file_unlock_lease(file.c)
+pcc_inode_fini函数赋NULL
+
+
+static inline struct ll_inode_info *ll_i2info(struct inode *inode)
+{
+    //给定inode的地址，struct类型ll_inode_info，以及ll_inode_info中inode地址对应的变量名，返回该结构体的首地址。
+    return container_of(inode, struct ll_inode_info, lli_vfs_inode);
+}
+```
 
 
 

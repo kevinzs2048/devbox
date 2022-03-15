@@ -86,10 +86,11 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
          * ESR_ELx_WNR->ISS表中的WnR，值为1则说明写内存区域发生错误；值为0说明读内存区域发生错误
          * 若异常是EL0中的指令异常，说明这个进程地址空间具有可执行权限
          * ESR_ELx_CM 显示为Cache maintenance 信息。
-         * arm64架构中，WNR总会被设置为1： db6f41063cbdb58b14846e600e6bc3f4e4c2e888
+         * arm64架构中 db6f41063cbdb58b14846e600e6bc3f4e4c2e888
          * 但是指令被认为是Read操作：log信息摘录:The WnR bit, usually used to distinguish between
          * faulting loads and stores, always reads as 1 and (slightly confusingly) the instructions
          * are treated as reads by the architecture.
+         * https://developer.arm.com/documentation/ddi0595/2021-06/AArch64-Registers/ESR-EL1--Exception-Syndrome-Register--EL1-
          */
 		vm_flags = VM_WRITE;
 		mm_flags |= FAULT_FLAG_WRITE;
@@ -936,6 +937,17 @@ struct vm_area_struct {
 
 ```
 
+Page 与 PTE建立联系的逻辑
+do_read_fault-> __do_fault(vmf), vmf中已经包含page对象。
+             -> finish_fault(vmf), alloc_set_pte(vmf, vmf->memcg, page)
+
+alloc_set_pte: setup new PTE entry for given page and add reverse page
+      mapping. If needed, the fucntion allocates page table or use pre-allocated.
+pte_alloc_one_map
+
 
 Reference
 https://pzh2386034.github.io/Black-Jack/linux-memory/2019/09/15/ARM64%E5%86%85%E5%AD%98%E7%AE%A1%E7%90%86%E5%8D%81%E4%BA%94-do_page_fault%E7%BC%BA%E9%A1%B5%E4%B8%AD%E6%96%AD/
+
+
+
