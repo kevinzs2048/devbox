@@ -1,2 +1,5 @@
-# development_directory
-Some useful file for development
+# devbox
+Some useful files
+Some Notes
+Some configs
+Some scripts
