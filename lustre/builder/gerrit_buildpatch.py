@@ -72,7 +72,7 @@ GERRIT_AUTH_PATH = os.getenv('GERRIT_AUTH_PATH', 'GERRIT_AUTH')
 #     ...
 # }
 
-CHECKPATCH_PATHS = _getenv_list('CHECKPATCH_PATHS', ['/root/run_build.sh'])
+CHECKPATCH_PATHS = _getenv_list('CHECKPATCH_PATHS', ['/root/test/devbox/lustre/builder/run-build.sh'])
 REVIEW_HISTORY_PATH = os.getenv('REVIEW_HISTORY_PATH', 'REVIEW_HISTORY')
 
 BUILDER_TYPE = 'Arm64 Builder'
@@ -135,7 +135,7 @@ class Reviewer(object):
         self.host = host
         self.project = project
         self.branch = branch
-        self.auth = requests.auth.HTTPDigestAuth(username, password)
+        self.auth = requests.auth.HTTPBasicAuth('KevinZhao', 'c1qjF7+KcOdKwEPB47PhdDMXArQIxpWcsuV9iJKk/Q')
         self.logger = logging.getLogger(__name__)
         self.history_path = history_path
         self.history_mode = 'rw'
@@ -153,7 +153,7 @@ class Reviewer(object):
 
     def _url(self, path):
         """_"""
-        return 'http://' + self.host + '/a' + path
+        return 'https://' + self.host + '/a' + path
 
     def _get(self, path):
         """

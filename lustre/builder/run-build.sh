@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GERRITPATH=/root/git/lustre-release
+GERRITPATH=/root/test/lustre-release
 GERRITREPO="http://review.whamcloud.com/fs/lustre-release"
 KERNELSRC=/root/kernel-4.18.0-348.2.1.el8_5/linux-4.18.0-348.2.1.el8_lustre_debug_debug.aarch64
 SMPJOBS=$(grep processor /proc/cpuinfo  | wc -l)
