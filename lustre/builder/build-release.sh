@@ -20,9 +20,9 @@ cd $GERRITPATH
 git fetch origin
 git reset --hard origin/master
 
-sh autogen.sh
-./configure --enable-dist
-make dist
+#sh autogen.sh
+#./configure --enable-dist
+#make dist
 
 CODEBASE=`find . -name "lustre*tar.gz"`
 CODEBASE=${CODEBASE: 2}
@@ -34,15 +34,15 @@ if [ ! -f "$CODEBASE" ]; then
 fi
 
 mkdir -p $SOURCE_DIR/$BUILD_ARGS
-mv $CODEBASE $SOURCE_DIR/$BUILD_ARGS/
+cp $CODEBASE $SOURCE_DIR/$BUILD_ARGS/
 cd $SOURCE_DIR/$BUILD_ARGS
 tar zxf $CODEBASE
 
 CODE_DIR=${CODEBASE%.tar.gz}
 mv $CODEBASE $CODEBASE.bk
 
-yes | cp $BUILD_ROOT_DIR/kernel-4.18.0-4.18-rhel8.5-aarch64.config-debug $SOURCE_DIR/lustre/kernel_patches/kernel_configs/
-tar zcf $CODEBASE $SOURCE_DIR
+yes | cp $BUILD_ROOT_DIR/kernel-4.18.0-4.18-rhel8.5-aarch64.config-debug $SOURCE_DIR/$BUILD_ARGS/$CODE_DIR/lustre/kernel_patches/kernel_configs/
+tar zcf $CODEBASE $CODE_DIR
 
 if [ ! -f "$CODEBASE" ]; then
     echo "$CODEBASE does not exist"
@@ -54,4 +54,6 @@ echo "Executing the Build process"
 mkdir -p $BUILD_DIR
 cd $BUILD_DIR
 
-$BUILD_ROOT_DIR/lustre-release/contrib/lbuild/lbuild --lustre=$SOURCE_DIR/$BUILD_ARGS/$CODEBASE --extraversion=debug --enable-kernel-debug --target=4.18-rhel8.5 --distro=rhel8.5 --kerneldir=$SOURCE_DIR --disable-zfs --with-linux=$LIUNX_DIR
+#$BUILD_ROOT_DIR/lustre-release/contrib/lbuild/lbuild --lustre=$SOURCE_DIR/$BUILD_ARGS/$CODEBASE --extraversion=debug --enable-kernel-debug --target=4.18-rhel8.5 --distro=rhel8.5 --kerneldir=$SOURCE_DIR --disable-zfs --with-linux=$LIUNX_DIR
+
+$BUILD_ROOT_DIR/lustre-release/contrib/lbuild/lbuild --lustre=$SOURCE_DIR/$BUILD_ARGS/$CODEBASE --extraversion=debug --enable-kernel-debug --target=4.18-rhel8.5 --distro=rhel8.5 --kerneldir=$SOURCE_DIR --disable-zfs
