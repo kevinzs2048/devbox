@@ -55,6 +55,6 @@ resource "openstack_blockstorage_volume_v2" "mds01_volume02" {
 }
 
 resource "openstack_compute_volume_attach_v2" "mds01_volume02_attach" {
-  instance_id = openstack_compute_instance_v2.mds01_volume02.id
+  instance_id = openstack_compute_instance_v2.mds01.id
   volume_id   = openstack_blockstorage_volume_v2.mds01_volume02.id
 }
