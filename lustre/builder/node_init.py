@@ -1,53 +1,15 @@
 import logging
 import paramiko
 from scp import SCPClient
-import os
-import json
-import os
-import requests
-import subprocess
-import time
-import urllib
+import const
 
-
-#
-# Node Type:
-
-CLIENT = 'CLIENT'
-MDS = 'MDS'
-OST = 'OST'
-
-TEST_WORKSPACE = '/root/test/devbox/lustre/builder/workspaces/'
-SSH_PRIVATE_KEY = '/home/centos/workspace/node/id_rsa'
-SSH_PRIKEY_EXEC = '/home/centos/.ssh/'
-NODE_INFO = TEST_WORKSPACE + 'lustre-test-node.conf'
-
-LUSTER_TEST_CFG = '/usr/lib64/lustre/tests/cfg/'
-
-MDS_DISK1 = "/dev/sdb"
-MDS_DISK2 = "/dev/sdc"
-
-OST_DISK1 = "/dev/sdb"
-OST_DISK2 = "/dev/sdc"
-OST_DISK3 = "/dev/sdd"
-OST_DISK4 = "/dev/sde"
-OST_DISK5 = "/dev/sdf"
-OST_DISK6 = "/dev/sdg"
-OST_DISK7 = "/dev/sdh"
-OST_DISK8 = "/dev/sdi"
-
-#
-# Node Configuration File
-# hostname IP TYPE
-# TYPE: CLIENT MDS OST
-#
 
 class Node(object):
     def __init__(self, host, ip, type, node_map):
         self.host = host
         self.ip = ip
         self.type = type
-        self.ssh_user = 'centos'
+        self.ssh_user = const.DEFAULT_SSH_USER
         self.ssh_private_key = None
         self.node_map = node_map
         self.ssh_client = self.ssh_connection
@@ -61,9 +23,8 @@ class Node(object):
         self.logger.error(msg, *args)
 
     def ssh_connection(self):
-        private_key = paramiko.RSAKey.from_private_key_file(SSH_PRIVATE_KEY)
+        private_key = paramiko.RSAKey.from_private_key_file(const.SSH_PRIVATE_KEY)
         self.ssh_client = paramiko.SSHClient()
-        # 允许连接不在know_hosts文件中的主机
         self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.ssh_client.connect(hostname=self.ip, port=22, username=self.ssh_user, pkey=private_key)
 
@@ -121,7 +82,7 @@ class Node(object):
         # Generate passwordless ssh keys for hosts and exchange identities across all nodes, and also accept the host fingerprints
         # The goal is to be able to pdsh using ssh from all machines without requiring any user input
         # All the node use the same keys to login
-        self.scp_send(SSH_PRIVATE_KEY, SSH_PRIKEY_EXEC)
+        self.scp_send(const.SSH_PRIVATE_KEY, const.SSH_PRIKEY_EXEC)
 
         # Create an NFS share that is mounted on all the nodes
         # A small number of tests will make use of a shared storage location
@@ -139,9 +100,9 @@ def multinode_conf_gen(node_map):
     total_mds = 0
     CLIENTS = None
 
-    with open(TEST_WORKSPACE + "multinode.sh", 'w+') as test_conf:
+    with open(const.TEST_WORKSPACE + "multinode.sh", 'w+') as test_conf:
         for key, node_info in node_map.items():
-            if node_info[2] == CLIENT:
+            if node_info[2] == const.CLIENT:
                 if total_client == 0:
                     CLIENTS = node_info[0]
                     total_client += 1
@@ -153,12 +114,12 @@ def multinode_conf_gen(node_map):
                     RCLIENT_WRITE = "RCLIENTS=\"" + CLIENTS + "\"\n"
                     test_conf.write("CLIENTCOUNT=2\n")
                     test_conf.write(RCLIENT_WRITE)
-            if node_info[2] == MDS:
+            if node_info[2] == const.MDS:
                 if total_mds == 0:
                     MDS_HOST = "mds_HOST=\"" + node_info[0] + "\n"
-                    MDS_DEV1 = "MDSDEV1=\"" + MDS_DISK1 + "\"\n"
+                    MDS_DEV1 = "MDSDEV1=\"" + const.MDS_DISK1 + "\"\n"
                     MDS3_HOST = "mds3_HOST=\"" + node_info[0] + "\n"
-                    MDS_DEV3 = "MDSDEV3=\"" + MDS_DISK2 + "\"\n"
+                    MDS_DEV3 = "MDSDEV3=\"" + const.MDS_DISK2 + "\"\n"
                     test_conf.write(MDS_HOST)
                     test_conf.write(MDS_DEV1)
                     test_conf.write(MDS3_HOST)
@@ -166,9 +127,9 @@ def multinode_conf_gen(node_map):
                     total_mds += 1
                 elif total_mds == 1:
                     MDS2_HOST = "mds2_HOST=\"" + node_info[0] + "\n"
-                    MDS_DEV2 = "MDSDEV2=\"" + MDS_DISK1 + "\"\n"
+                    MDS_DEV2 = "MDSDEV2=\"" + const.MDS_DISK1 + "\"\n"
                     MDS4_HOST = "mds4_HOST=\"" + node_info[0] + "\n"
-                    MDS_DEV4 = "MDSDEV4=\"" + MDS_DISK2 + "\"\n"
+                    MDS_DEV4 = "MDSDEV4=\"" + const.MDS_DISK2 + "\"\n"
                     test_conf.write(MDS2_HOST)
                     test_conf.write(MDS_DEV2)
                     test_conf.write(MDS4_HOST)
@@ -176,7 +137,7 @@ def multinode_conf_gen(node_map):
                     total_mds += 1
                     MDSCOUNT = "MDSCOUNT=4\n"
                     test_conf.write(MDSCOUNT)
-            if node_info[2] == OST:
+            if node_info[2] == const.OST:
                 ostcount = "OSTCOUNT=8\n"
                 ost1_host = "ost_HOST=\"" + node_info[0] + "\"\n"
                 ostdev1 = "OSTDEV1=\"/dev/sdb\"\n"
@@ -186,19 +147,19 @@ def multinode_conf_gen(node_map):
                 for num in range(2, 9):
                     ost_disk = None
                     if num == 2:
-                        ost_disk = OST_DISK2
+                        ost_disk = const.OST_DISK2
                     elif num == 3:
-                        ost_disk = OST_DISK3
+                        ost_disk = const.OST_DISK3
                     elif num == 4:
-                        ost_disk = OST_DISK4
+                        ost_disk = const.OST_DISK4
                     elif num == 5:
-                        ost_disk = OST_DISK5
+                        ost_disk = const.OST_DISK5
                     elif num == 6:
-                        ost_disk = OST_DISK6
+                        ost_disk = const.OST_DISK6
                     elif num == 7:
-                        ost_disk = OST_DISK7
+                        ost_disk = const.OST_DISK7
                     elif num == 8:
-                        ost_disk = OST_DISK8
+                        ost_disk = const.OST_DISK8
 
                     ost_host = "ost" + str(num) + "_HOST=\"" + node_info[0] + "\"\n"
                     ost_dev = "OSTDEV" + str(num) + "=\"" + ost_disk + "\"\n"
@@ -221,21 +182,21 @@ def node_init(node_map):
 
     for key, node_info in node_map.items():
         test_node = Node(node_info[0], node_info[1], node_info[2])
-        if node_info[2] == CLIENT:
+        if node_info[2] == const.CLIENT:
             if total_client == 0:
                 test_client1 = test_node
                 total_client += 1
             if total_client == 1:
                 test_client2 = test_node
                 total_client += 1
-        if node_info[2] == MDS:
+        if node_info[2] == const.MDS:
             if total_mds == 0:
                 test_mds1 = test_node
                 total_mds += 1
             if total_mds == 1:
                 test_mds2 = test_node
                 total_mds += 1
-        if node_info[2] == OST:
+        if node_info[2] == const.OST:
                 test_ost = test_node
 
     # Initial CLIENT Node
@@ -250,7 +211,7 @@ def main():
 
     node_map = {}
     logging.basicConfig(format='%(asctime)s %(message)s', level=logging.DEBUG)
-    with open(NODE_INFO, 'r') as f2:
+    with open(const.NODE_INFO, 'r') as f2:
         line = f2.readline()
         i = 0
         while line is not None and line != '':
