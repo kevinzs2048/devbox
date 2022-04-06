@@ -11,8 +11,7 @@ from datetime import datetime
 
 
 class Provisioner(object):
-    def __init__(self, test_type):
-        self.test_type = test_type
+    def __init__(self):
         self.node_map = None
         self.tf_conf_dir = None
         self.node_ip_list = []
