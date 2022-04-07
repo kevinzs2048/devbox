@@ -3,7 +3,7 @@ CLIENT = 'CLIENT'
 MDS = 'MDS'
 OST = 'OST'
 
-TEST_WORKSPACE = '/root/test/devbox/lustre/builder/workspaces/'
+TEST_WORKSPACE = '/home/centos/workspace/'
 SSH_PRIVATE_KEY = '/home/centos/workspace/node/id_rsa'
 SSH_PRIKEY_EXEC = '/home/centos/.ssh/'
 NODE_INFO = TEST_WORKSPACE + 'lustre-test-node.conf'
@@ -20,7 +20,7 @@ TEST_CLIENT = "TEST_CLIENT"
 TERRAFORM_CLIENT01_IP = "client01_ip"
 TERRAFORM_CLIENT02_IP = "client02_ip"
 TERRAFORM_MDS01_IP = "mds01_ip"
-TERRAFORM_MDS02_IP = "mds01_ip"
+TERRAFORM_MDS02_IP = "mds02_ip"
 TERRAFORM_OST01_IP = "ost01_ip"
 
 TERRAFORM_CLIENT01_HOSTNAME = "client01_hostname"
@@ -29,7 +29,7 @@ TERRAFORM_MDS01_HOSTNAME = "mds01_hostname"
 TERRAFORM_MDS02_HOSTNAME = "mds02_hostname"
 TERRAFORM_OST01_HOSTNAME = "ost01_hostname"
 
-DEFAULT_SSH_USER = 'centos'
+DEFAULT_SSH_USER = 'jenkins'
 CLOUD_INIT_TIMEOUT = 900
 CLOUD_INIT_FINISH = "/var/lib/cloud/instance/boot-finished"
 

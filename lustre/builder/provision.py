@@ -1,4 +1,5 @@
 import paramiko
+from paramiko import ssh_exception
 import random
 import string
 import os
@@ -8,14 +9,16 @@ from os.path import exists
 import const
 import time
 from datetime import datetime
+import logging
 
 
 class Provisioner(object):
-    def __init__(self):
+    def __init__(self, logger):
+        self.logger = logger
         self.node_map = None
         self.tf_conf_dir = None
         self.node_ip_list = []
-        self.user = const.DEFAULT_SSH_USER
+        self.ssh_user = const.DEFAULT_SSH_USER
 
     def _debug(self, msg, *args):
         """_"""
@@ -33,13 +36,19 @@ class Provisioner(object):
         private_key = paramiko.RSAKey.from_private_key_file(const.SSH_PRIVATE_KEY)
         ssh_client = paramiko.SSHClient()
         ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh_client.connect(hostname=ip, port=22, username=self.ssh_user, pkey=private_key)
+        try:
+            ssh_client.connect(hostname=ip, port=22, username=self.ssh_user, pkey=private_key)
+        except ssh_exception.NoValidConnectionsError as e:
+            self._debug("Not yet connected to this node: " + e)
+            return
 
         # Test SSH connection
         stdin, stdout, stderr = ssh_client.exec_command('ls /')
-        if stderr:
-            self._error(stderr.read().decode('utf-8'))
+        error = stderr.read()
+        if error.strip():
+            self._error(error)
             return
+
         self._debug("SSH client for IP: " + ip + " initialization is finished")
         return ssh_client
 
@@ -49,11 +58,11 @@ class Provisioner(object):
     def ssh_exec(self, ssh_client, cmd):
         # Test SSH connection
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
-        if stderr:
-            result = stderr.read()
-            self._debug(result.decode('utf-8'))
-            return
-        return stdout
+        error = stderr.read()
+        if error.strip():
+            self._error(error)
+            return False
+        return True
 
     def copy_dir(self, test_name):
         tf_conf_dir = const.TERRAFORM_CONF_DIR + test_name
@@ -64,18 +73,19 @@ class Provisioner(object):
             except OSError:
                 self._error("mkdir failed: " + tf_conf_dir)
         for f in os.listdir(source_dir):
-            source_file = os.path.join(source_dir, f)
-            target_file = os.path.join(tf_conf_dir, f)
-            if not os.path.exists(target_file) or (
-                    os.path.exists(target_file) and (
-                    os.path.getsize(target_file) != os.path.getsize(source_file))):
-                open(target_file, "wb").write(open(source_file, "rb").read())
+            if f.endswith("tf") or f == "cloud-init":
+                source_file = os.path.join(source_dir, f)
+                target_file = os.path.join(tf_conf_dir, f)
+                if not os.path.exists(target_file) or (
+                        os.path.exists(target_file) and (
+                        os.path.getsize(target_file) != os.path.getsize(source_file))):
+                    open(target_file, "wb").write(open(source_file, "rb").read())
 
     def prepare_tf_conf(self):
         test_hash = self.host_name_gen()
         test_name = "lustre-" + test_hash
         self.copy_dir(test_name)
-        self.tf_conf_dir = const.TERRAFORM_CONF_DIR + test_name
+        self.tf_conf_dir = const.TERRAFORM_CONF_DIR + test_name + "/"
 
         network_port_prefix = "lustre_" + test_hash
         tf_vars = {
@@ -96,30 +106,41 @@ class Provisioner(object):
     def terraform_init(self):
         os.chdir(self.tf_conf_dir)
         if os.path.exists(const.TERRAFORM_VARIABLES_JSON):
-            try:
-                result = subprocess.check_output([const.TERRAFORM_BIN, 'init'])
-            except subprocess.CalledProcessError as e:
-                #result = e.output  # Output generated before error
-                #code = e.returncode  # Return code
-                self._error("Error when terraform_init: " + e.output)
+            p = subprocess.Popen([const.TERRAFORM_BIN, 'init'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            while p.poll() is None:
+                line = p.stdout.readline()
+                line = line.strip()
+                if line:
+                    print(line.decode('utf-8'))
+            if p.returncode == 0:
+                self._debug('Terraform Init success')
+                return True
+            else:
+                self._debug('Terraform Init failed')
                 return False
-            self._debug(result.decode('utf-8'))
-            return True
-        return False
+
+        else:
+            self._error("Terraform args does not exist: " + const.TERRAFORM_VARIABLES_JSON)
+            return False
 
     def terraform_apply(self):
         os.chdir(self.tf_conf_dir)
         if self.terraform_init():
-            try:
-                result = subprocess.check_output([const.TERRAFORM_BIN, 'apply -auto-approve'])
-            except subprocess.CalledProcessError as e:
-                #result = e.output  # Output generated before error
-                #code = e.returncode  # Return code
-                self._error("Error when terraform_apply: " + e.output)
+            p = subprocess.Popen([const.TERRAFORM_BIN, 'apply', '-auto-approve'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            while p.poll() is None:
+                line = p.stdout.readline()
+                line = line.strip()
+                if line:
+                    print(line.decode('utf-8'))
+            if p.returncode == 0:
+                self._debug('Terraform apply success')
+                return True
+            else:
+                self._debug('Terraform apply failed')
                 return False
-            self._debug(result.decode('utf-8'))
-            return True
-        return False
+        else:
+            self._error("Terraform Init failed")
+            return False
 
     def write_to_file(self):
         result = subprocess.check_output([const.TERRAFORM_BIN, 'output'])
@@ -140,38 +161,39 @@ class Provisioner(object):
             node_info_str = info.decode('utf-8')
             node_info = node_info_str.split(" = ")
             if node_info[0] == const.TERRAFORM_CLIENT01_IP:
-                client01_ip = node_info[1]
+                client01_ip = eval(node_info[1])
                 self.node_ip_list.append(client01_ip)
             elif node_info[0] == const.TERRAFORM_CLIENT02_IP:
-                client02_ip = node_info[1]
+                client02_ip = eval(node_info[1])
                 self.node_ip_list.append(client02_ip)
             elif node_info[0] == const.TERRAFORM_MDS01_IP:
-                mds01_ip = node_info[1]
+                mds01_ip = eval(node_info[1])
                 self.node_ip_list.append(mds01_ip)
             elif node_info[0] == const.TERRAFORM_MDS02_IP:
-                mds02_ip = node_info[1]
+                mds02_ip = eval(node_info[1])
                 self.node_ip_list.append(mds02_ip)
             elif node_info[0] == const.TERRAFORM_OST01_IP:
-                ost01_ip = node_info[1]
+                ost01_ip = eval(node_info[1])
                 self.node_ip_list.append(ost01_ip)
             elif node_info[0] == const.TERRAFORM_CLIENT01_HOSTNAME:
-                client01_hostname = node_info[1]
+                client01_hostname = eval(node_info[1])
             elif node_info[0] == const.TERRAFORM_CLIENT02_HOSTNAME:
-                client02_hostname = node_info[1]
+                client02_hostname = eval(node_info[1])
             elif node_info[0] == const.TERRAFORM_MDS01_HOSTNAME:
-                mds01_hostname = node_info[1]
+                mds01_hostname = eval(node_info[1])
             elif node_info[0] == const.TERRAFORM_MDS02_HOSTNAME:
-                mds02_hostname = node_info[1]
+                mds02_hostname = eval(node_info[1])
             elif node_info[0] == const.TERRAFORM_OST01_HOSTNAME:
-                ost01_hostname = node_info[1]
+                ost01_hostname = eval(node_info[1])
             else:
                 self._error("The node info is not correct.")
 
+        print(self.node_ip_list)
         with open(const.NODE_INFO, 'w+') as node_conf:
-            node_conf.write(client01_hostname + ' ' + client01_ip + ' ' + const.CLIENT)
-            node_conf.write(client02_hostname + ' ' + client02_ip + ' ' + const.CLIENT)
-            node_conf.write(mds01_hostname + ' ' + mds01_ip + ' ' + const.MDS)
-            node_conf.write(mds02_hostname + ' ' + mds02_ip + ' ' + const.MDS)
+            node_conf.write(client01_hostname + ' ' + client01_ip + ' ' + const.CLIENT + '\n')
+            node_conf.write(client02_hostname + ' ' + client02_ip + ' ' + const.CLIENT + '\n')
+            node_conf.write(mds01_hostname + ' ' + mds01_ip + ' ' + const.MDS + '\n')
+            node_conf.write(mds02_hostname + ' ' + mds02_ip + ' ' + const.MDS + '\n')
             node_conf.write(ost01_hostname + ' ' + ost01_ip + ' ' + const.OST)
 
     def node_check(self):
@@ -186,14 +208,17 @@ class Provisioner(object):
                         if ssh_client not in ssh_clients:
                             ssh_clients.append(ssh_client)
 
-                if len(ssh_clients) == 5:
+                ready_clients = len(ssh_clients)
+                if ready_clients == 5:
                     self._debug("All the clients is ready")
                     break
                 else:
-                    time.sleep(5)
+                    self._debug("Ready clients are: " + str(ready_clients))
+                    time.sleep(10)
+
             t1 = datetime.now()
             node_status = []
-            while (datetime.now() - t1).seconds <= const.CLOUD_INIT_FINISH:
+            while (datetime.now() - t1).seconds <= const.CLOUD_INIT_TIMEOUT:
                 for client in ssh_clients:
                     if client in node_status:
                         continue
@@ -204,7 +229,8 @@ class Provisioner(object):
                             self._error("The cloud-init process is not finished")
                 ready_node = len(node_status)
                 self._debug("Ready nodes: " + str(ready_node))
-
+                if ready_node == 5:
+                    break
                 time.sleep(10)
 
             if len(node_status) == 5:
@@ -219,8 +245,15 @@ class Provisioner(object):
             return False
 
     def provision(self):
-        self.prepare_tf_conf()
-        if self.terraform_apply():
+        needs_new_env = False
+        if needs_new_env:
+            self.prepare_tf_conf()
+        else:
+            self.tf_conf_dir = const.TERRAFORM_CONF_DIR + "lustre-NJQWIdPR" + "/"
+
+        tf_return = self.terraform_apply()
+
+        if tf_return:
             self.write_to_file()
         else:
             self._error("Terraform apply process failed")
@@ -236,7 +269,10 @@ class Provisioner(object):
 
 
 def main():
-    lustre_cluster_provisioner = Provisioner()
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
+    lustre_cluster_provisioner = Provisioner(logger)
     lustre_cluster_provisioner.provision()
 
 if __name__ == "__main__":
