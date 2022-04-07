@@ -10,6 +10,8 @@ NODE_INFO = TEST_WORKSPACE + 'lustre-test-node.conf'
 TERRAFORM_CONF_TEMPLATE_DIR = '/home/centos/tf/devbox/lustre/builder/tf'
 TERRAFORM_CONF_DIR = '/home/centos/tf/'
 
+TERRAFORM_EXIST_CONF = "lustre-NJQWIdPR/"
+
 TERRAFORM_VARIABLES_JSON = "terraform.tfvars.json"
 TERRAFORM_BIN = "/home/centos/terraform"
 
@@ -35,17 +37,17 @@ CLOUD_INIT_FINISH = "/var/lib/cloud/instance/boot-finished"
 
 LUSTER_TEST_CFG = '/usr/lib64/lustre/tests/cfg/'
 
-MDS_DISK1 = "/dev/sdb"
-MDS_DISK2 = "/dev/sdc"
+MDS_DISK1 = "/dev/vdb"
+MDS_DISK2 = "/dev/vdc"
 
-OST_DISK1 = "/dev/sdb"
-OST_DISK2 = "/dev/sdc"
-OST_DISK3 = "/dev/sdd"
-OST_DISK4 = "/dev/sde"
-OST_DISK5 = "/dev/sdf"
-OST_DISK6 = "/dev/sdg"
-OST_DISK7 = "/dev/sdh"
-OST_DISK8 = "/dev/sdi"
+OST_DISK1 = "/dev/vdb"
+OST_DISK2 = "/dev/vdc"
+OST_DISK3 = "/dev/vdd"
+OST_DISK4 = "/dev/vde"
+OST_DISK5 = "/dev/vdf"
+OST_DISK6 = "/dev/vdg"
+OST_DISK7 = "/dev/vdh"
+OST_DISK8 = "/dev/vdi"
 
 #
 # Node Configuration File

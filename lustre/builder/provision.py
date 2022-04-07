@@ -10,7 +10,7 @@ import const
 import time
 from datetime import datetime
 import logging
-
+import threading
 
 class Provisioner(object):
     def __init__(self, logger):
@@ -19,6 +19,7 @@ class Provisioner(object):
         self.tf_conf_dir = None
         self.node_ip_list = []
         self.ssh_user = const.DEFAULT_SSH_USER
+        self.ssh_clients = []
 
     def _debug(self, msg, *args):
         """_"""
@@ -58,12 +59,20 @@ class Provisioner(object):
     def ssh_exec(self, ssh_client, cmd):
         # Test SSH connection
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
+        while True:
+            line = stdout.readline()
+            if not line:
+                break
+            print(line)
         error = stderr.read()
         if error.strip():
             self._error(error)
             return False
         return True
 
+    #
+    # Copy the terraform template from the source file to another destination
+    #
     def copy_dir(self, test_name):
         tf_conf_dir = const.TERRAFORM_CONF_DIR + test_name
         source_dir = const.TERRAFORM_CONF_TEMPLATE_DIR
@@ -81,6 +90,9 @@ class Provisioner(object):
                         os.path.getsize(target_file) != os.path.getsize(source_file))):
                     open(target_file, "wb").write(open(source_file, "rb").read())
 
+    #
+    # Prepare the terraform configuration, all the args are defined at TERRAFORM_VARIABLES_JSON
+    #
     def prepare_tf_conf(self):
         test_hash = self.host_name_gen()
         test_name = "lustre-" + test_hash
@@ -103,6 +115,9 @@ class Provisioner(object):
         with open(self.tf_conf_dir + const.TERRAFORM_VARIABLES_JSON, "w") as f:
             json.dump(tf_vars, f)
 
+    #
+    # Terraform Init command
+    #
     def terraform_init(self):
         os.chdir(self.tf_conf_dir)
         if os.path.exists(const.TERRAFORM_VARIABLES_JSON):
@@ -123,10 +138,14 @@ class Provisioner(object):
             self._error("Terraform args does not exist: " + const.TERRAFORM_VARIABLES_JSON)
             return False
 
+    #
+    # Terraform Apply
+    #
     def terraform_apply(self):
         os.chdir(self.tf_conf_dir)
         if self.terraform_init():
-            p = subprocess.Popen([const.TERRAFORM_BIN, 'apply', '-auto-approve'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            p = subprocess.Popen([const.TERRAFORM_BIN, 'apply', '-auto-approve'],
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             while p.poll() is None:
                 line = p.stdout.readline()
                 line = line.strip()
@@ -142,6 +161,9 @@ class Provisioner(object):
             self._error("Terraform Init failed")
             return False
 
+    #
+    # After configuration, write the node hostname/IP/TYPE to NODE_INFO
+    #
     def write_to_file(self):
         result = subprocess.check_output([const.TERRAFORM_BIN, 'output'])
 
@@ -188,7 +210,6 @@ class Provisioner(object):
             else:
                 self._error("The node info is not correct.")
 
-        print(self.node_ip_list)
         with open(const.NODE_INFO, 'w+') as node_conf:
             node_conf.write(client01_hostname + ' ' + client01_ip + ' ' + const.CLIENT + '\n')
             node_conf.write(client02_hostname + ' ' + client02_ip + ' ' + const.CLIENT + '\n')
@@ -196,19 +217,22 @@ class Provisioner(object):
             node_conf.write(mds02_hostname + ' ' + mds02_ip + ' ' + const.MDS + '\n')
             node_conf.write(ost01_hostname + ' ' + ost01_ip + ' ' + const.OST)
 
+    #
+    # Check the node is alive and the cloud-init is finished.
+    # Using SSH, all the ssh keys credential is the same
+    #
     def node_check(self):
-        # Check the node is alive and the cloud-init is finished.
+
         if len(self.node_ip_list) == 5:
-            ssh_clients = []
             ssh_check_cmd = "ls -l " + const.CLOUD_INIT_FINISH
             while True:
                 for ip in self.node_ip_list:
                     ssh_client = self.ssh_connection(ip)
                     if ssh_client is not None:
-                        if ssh_client not in ssh_clients:
-                            ssh_clients.append(ssh_client)
+                        if ssh_client not in self.ssh_clients:
+                            self.ssh_clients.append(ssh_client)
 
-                ready_clients = len(ssh_clients)
+                ready_clients = len(self.ssh_clients)
                 if ready_clients == 5:
                     self._debug("All the clients is ready")
                     break
@@ -219,7 +243,7 @@ class Provisioner(object):
             t1 = datetime.now()
             node_status = []
             while (datetime.now() - t1).seconds <= const.CLOUD_INIT_TIMEOUT:
-                for client in ssh_clients:
+                for client in self.ssh_clients:
                     if client in node_status:
                         continue
                     else:
@@ -244,12 +268,19 @@ class Provisioner(object):
             self._error("Cluster node count is not right")
             return False
 
+    #
+    # The main process
+    # For stablity, we can set provision_new to False, and then set the terraform dir
+    # then each running will use the same 5 nodes for test.
+    # Note: This will not install all the packages, so we needs to do some procedures which
+    # is in cloud-init to another function.
+    #
     def provision(self):
-        needs_new_env = False
-        if needs_new_env:
+        provision_new = False
+        if provision_new:
             self.prepare_tf_conf()
         else:
-            self.tf_conf_dir = const.TERRAFORM_CONF_DIR + "lustre-NJQWIdPR" + "/"
+            self.tf_conf_dir = const.TERRAFORM_CONF_DIR + const.TERRAFORM_EXIST_CONF
 
         tf_return = self.terraform_apply()
 
@@ -262,10 +293,48 @@ class Provisioner(object):
         # check the file is there
         if exists(const.NODE_INFO):
             if self.node_check():
+                if not provision_new:
+                    self._debug("Does not provision new instances, we need to reinstall Lustre from the repo")
+                    return self.node_operate()
                 return True
+            else:
+                self._error("The node_check is failed")
+                return False
         else:
             self._error("The config file does not exist: " + const.NODE_INFO)
             return False
+
+    def install_lustre(self, client):
+        cmd1 = "sudo dnf config-manager --set-enabled ha"
+        cmd2 = "sudo dnf config-manager --set-enabled powertools"
+        cmd3 = "sudo dnf install epel-release pdsh pdsh-rcmd-ssh net-tools dbench fio linux-firmware -y"
+        cmd4 = "sudo dnf --disablerepo = \"*\"  --enablerepo = \"lustre\" install kernel kernel-debuginfo kernel-debuginfo-common-aarch64 kernel-devel kernel-core kernel-headers kernel-modules kernel-modules-extra kernel-tools kernel-tools-libs kernel-tools-libs-devel kernel-tools-debuginfo -y"
+        cmd5 = "sudo dnf install e2fsprogs e2fsprogs-devel e2fsprogs-debuginfo e2fsprogs-static e2fsprogs-libs e2fsprogs-libs-debuginfo libcom_err libcom_err-devel libcom_err-debuginfo libss libss-devel libss-debuginfo -y"
+        cmd6 = "sudo dnf install lustre lustre-debuginfo lustre-debugsource lustre-devel lustre-iokit lustre-osd-ldiskfs-mount lustre-osd-ldiskfs-mount-debuginfo lustre-resource-agents lustre-tests lustre-tests-debuginfo kmod-lustre kmod-lustre-debuginfo kmod-lustre-osd-ldiskfs kmod-lustre-tests -y"
+
+        if not self.ssh_exec(client, cmd1):
+            self._error("cmd1 Failed")
+        if not self.ssh_exec(client, cmd2):
+            self._error("cmd2 Failed")
+        if not self.ssh_exec(client, cmd3):
+            self._error("cmd3 Failed")
+        if not self.ssh_exec(client, cmd4):
+            self._error("cmd4 Failed")
+        if not self.ssh_exec(client, cmd5):
+            self._error("cmd5 Failed")
+        if not self.ssh_exec(client, cmd6):
+            self._error("cmd6 Failed")
+
+    def node_operate(self):
+        thread_list = []
+        for client in self.ssh_clients:
+            x = threading.Thread(target=self.install_lustre, args=(client,))
+            x.start()
+            thread_list.append(x)
+
+        for x in thread_list:
+            x.join()
+        return True
 
 
 def main():
