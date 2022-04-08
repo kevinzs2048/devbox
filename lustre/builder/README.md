@@ -5,10 +5,10 @@ This repo include all the script we needs for Lustre Arm64 external Builder and 
 ## Lustre CI pipeline
 
 ```mermaid
-graph pipeline;
-A[Terraform OpenStack]-->B[Node Init];
-B[Node Init]-->C[Test Cluster Reboot];
-C[Test Cluster Reboot]-->D[Auster Run Test];
-D[Auster Run Test]-->E[Upload Maloo DB];
-E[Upload Maloo DB]-->F[Keep/Destroy Cluster];
+graph TD
+A[Terraform OpenStack]-->B[Node Init]
+B-->C[Test Cluster Reboot]
+C-->D[Auster Run Test]
+D-->E[Upload Maloo DB]
+E-->F[Keep/Destroy Cluster]
 ```
