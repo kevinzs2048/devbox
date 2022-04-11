@@ -35,16 +35,10 @@ The node init module has several steps
 
 ```mermaid
 graph TD
-A[Prepare tf conf]
-A-->|Provision New| B[Prepare tf configuration]
-A-->|Use existing cluster| C[Use existing tf config]
-B-->D[Generate tfvars and dir]
-D-->E[Terraform Init]
-E-->F[Terraform Apply]
-C-->D
-F-->G[Node Check]
-G-->|Provision New| I[Wait Cloud-init Finished Flags]
-G-->|Use existing cluster| J[Install new Lustre RPMS]
-I-->K[Write node-info config]
-J-->K
+A[Abstract the node-info config]
+A-->B[Write to node_map]
+B-->C[Begin Init all nodes]
+C-->E[Scp private key to all nodes]
+E-->F[Write /etc/hosts]
+F-->G[Generate Lustre test file]
 ```
