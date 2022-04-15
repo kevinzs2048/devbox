@@ -1,78 +1,74 @@
 #!/bin/bash
-set -e
 
-if [ ! -n "$1" ] ;then
-echo "Please specified the build args"
-exit 1
-fi
+set -xe
 
-BUILD_ARGS=$1
-BUILD_LINUX=YES
-BUILD_ROOT_DIR=/home/jenkins/build_dir
-SOURCE_DIR=$BUILD_ROOT_DIR/source
-BUILD_DIR=$BUILD_ROOT_DIR/build-$BUILD_ARGS
-LIUNX_DIR=$BUILD_ROOT_DIR/kernel-4.18.0-348.2.1.el8_5/linux-4.18.0-348.2.1.el8_lustre_debug_debug.aarch64/
+branch=${BRANCH:-'master'}
+build_id=${BUILD_ID:-'001'}
+build_type=${BUILD_TYPE:-'release'}
+build_linux=${BUILD_LINUX:-'no'}
 
-GERRITPATH=$BUILD_ROOT_DIR/lustre-release
-GERRITREPO="http://review.whamcloud.com/fs/lustre-release"
-
+build_dir=${WORKSPACE}/build-$build_id
+kernel_src_dir="/home/jenkins/src/kernel"
+linux_dir=$(find  $kernel_src_dir/reused/ -name .config|xargs dirname)
+remote_repo="git://git.whamcloud.com/fs/lustre-release.git"
+local_repo="/home/jenkins/git/lustre-release.git"
 # RPM repo for Lustre and e2fsprogs, Lustre repo also include kernel packages
-RPM_REPO=/usr/share/nginx/html/repo
+rpm_repo=/usr/share/nginx/html/repo/lustre
 
-echo "Generate the release tar bz"
-cd $GERRITPATH
-git fetch origin
-git reset --hard origin/master
+echo "Cleanup workspace dir"
+rm -rf ${WORKSPACE}/*
 
-files=$(ls *.tar.gz 2> /dev/null | wc -l);
-if [ "$files" != "0" ] ;then
-    yes | rm -i *.tar.gz -rf
-fi
+echo "Generate the release tar bz..."
+mkdir -p $build_dir
+cd $build_dir
+git clone --depth 1 --branch $branch --reference $local_repo $remote_repo
+cd lustre-release
 
-# Generate the source file
+# (TODO): download config from github
+cp $kernel_src_dir/kernel-4.18.0-4.18-rhel8.5-aarch64.config-debug \
+		$build_dir/lustre-release/lustre/kernel_patches/kernel_configs/
+
+# Generate the source tar file
 sh autogen.sh
 ./configure --enable-dist
 make dist
+code_base=$(find . -name "lustre*tar.gz")
+code_base=${code_base: 2}
 
-CODEBASE=`find . -name "lustre*tar.gz"`
-CODEBASE=${CODEBASE: 2}
-
-if [ ! -f "$CODEBASE" ]; then
-    echo "$CODEBASE does not exist"
-    exit 1
+echo "Build options prepare..."
+build_opts=""
+if [[ "$build_type" == "debug" ]]; then
+	build_opts+="--extraversion=debug --enable-kernel-debug "
 fi
 
-mkdir -p $SOURCE_DIR/$BUILD_ARGS
-cp $CODEBASE $SOURCE_DIR/$BUILD_ARGS/
-cd $SOURCE_DIR/$BUILD_ARGS
-tar zxf $CODEBASE
-
-CODE_DIR=${CODEBASE%.tar.gz}
-mv $CODEBASE $CODEBASE.bk
-
-yes | cp $BUILD_ROOT_DIR/kernel-4.18.0-4.18-rhel8.5-aarch64.config-debug $SOURCE_DIR/$BUILD_ARGS/$CODE_DIR/lustre/kernel_patches/kernel_configs/
-tar zcf $CODEBASE $CODE_DIR
-
-if [ ! -f "$CODEBASE" ]; then
-    echo "$CODEBASE does not exist"
-    exit 1
-fi
-
-echo "Executing the Build process"
-
-mkdir -p $BUILD_DIR
-cd $BUILD_DIR
-
-if [ -z BUILD_LINUX ]; then
-    # Build with exist Linux kernel
-    $BUILD_ROOT_DIR/lustre-release/contrib/lbuild/lbuild --lustre=$SOURCE_DIR/$BUILD_ARGS/$CODEBASE --extraversion=debug --enable-kernel-debug --target=4.18-rhel8.5 --distro=rhel8.5 --kerneldir=$SOURCE_DIR  --with-linux=$LIUNX_DIR
-    # Remove all the Lustre packages
-    sudo rm $RPM_REPO/lustre/*.el8.aarch64.rpm
+if [[ "$build_linux" == "yes" ]]; then
+    # Build along with Linux kernel
+	build_opts+="--kerneldir=$kernel_src_dir "
 else
-    # Build with Linux kernel
-    $BUILD_ROOT_DIR/lustre-release/contrib/lbuild/lbuild --lustre=$SOURCE_DIR/$BUILD_ARGS/$CODEBASE --extraversion=debug --enable-kernel-debug --target=4.18-rhel8.5 --distro=rhel8.5 --kerneldir=$SOURCE_DIR
-    # Remove all the Lustre packages and Linux packages
-    sudo rm $RPM_REPO/lustre/*.rpm
+    # Build with exist Linux kernel
+	build_opts+="--with-linux=$linux_dir "
 fi
 
-sudo mv $BUILD_DIR/RPMS/aarch64/*.rpm $RPM_REPO/lustre/
+echo "Build rpms..."
+cd $build_dir
+$build_dir/lustre-release/contrib/lbuild/lbuild \
+	--lustre=$build_dir/lustre-release/$code_base  \
+	--target=4.18-rhel8.5 --distro=rhel8.5 \
+	--ccache $build_opts
+
+echo "Re-generate rpm repo..."
+if [[ "$build_linux" == "yes" ]]; then
+	# copy linux src for reused building.
+	rm -rf $kernel_src_dir/reused
+	mv -f $build_dir/reused $kernel_src_dir
+    # Remove all the Lustre packages and Linux packages
+    sudo rm -rfv $rpm_repo/*.rpm
+else
+    # Remove all the Lustre packages
+    sudo rm -rfv $rpm_repo/*.el8.aarch64.rpm
+fi
+
+sudo mv -f $build_dir/RPMS/aarch64/*.aarch64.rpm $rpm_repo
+sudo createrepo --update $rpm_repo
+
+echo "Finish build."
