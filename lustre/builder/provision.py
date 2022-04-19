@@ -12,6 +12,7 @@ from datetime import datetime
 import logging
 import threading
 
+
 class Provisioner(object):
     def __init__(self, logger):
         self.logger = logger
@@ -22,11 +23,9 @@ class Provisioner(object):
         self.ssh_clients = []
 
     def _debug(self, msg, *args):
-        """_"""
         self.logger.debug(msg, *args)
 
     def _error(self, msg, *args):
-        """_"""
         self.logger.error(msg, *args)
 
     def host_name_gen(self):
@@ -112,6 +111,7 @@ class Provisioner(object):
             "lustre_mds02_port": network_port_prefix + "_mds02_port",
             "lustre_ost01_port": network_port_prefix + "_ost01_port"
         }
+        # Write the file to json file
         with open(self.tf_conf_dir + const.TERRAFORM_VARIABLES_JSON, "w") as f:
             json.dump(tf_vars, f)
 
@@ -122,21 +122,24 @@ class Provisioner(object):
         os.chdir(self.tf_conf_dir)
         if os.path.exists(const.TERRAFORM_VARIABLES_JSON):
             p = subprocess.Popen([const.TERRAFORM_BIN, 'init'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            while p.poll() is None:
-                line = p.stdout.readline()
-                line = line.strip()
-                if line:
-                    print(line.decode('utf-8'))
+            self.realtime_output(p)
             if p.returncode == 0:
-                self._debug('Terraform Init success')
+                self._debug('Terraform init success')
                 return True
             else:
-                self._debug('Terraform Init failed')
+                self._error('Terraform init failed')
                 return False
 
         else:
-            self._error("Terraform args does not exist: " + const.TERRAFORM_VARIABLES_JSON)
+            self._error("Terraform init failed: terraform args does not exist: " + const.TERRAFORM_VARIABLES_JSON)
             return False
+
+    def realtime_output(self, p):
+        while p.poll() is None:
+            line = p.stdout.readline()
+            line = line.strip()
+            if line:
+                print(line.decode('utf-8'))
 
     #
     # Terraform Apply
@@ -146,25 +149,20 @@ class Provisioner(object):
         if self.terraform_init():
             p = subprocess.Popen([const.TERRAFORM_BIN, 'apply', '-auto-approve'],
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-            while p.poll() is None:
-                line = p.stdout.readline()
-                line = line.strip()
-                if line:
-                    print(line.decode('utf-8'))
+            self.realtime_output(p)
             if p.returncode == 0:
                 self._debug('Terraform apply success')
                 return True
             else:
-                self._debug('Terraform apply failed')
+                self._error('Terraform apply failed')
                 return False
         else:
-            self._error("Terraform Init failed")
             return False
 
     #
     # After configuration, write the node hostname/IP/TYPE to NODE_INFO
     #
-    def write_to_file(self):
+    def gen_node_info(self):
         result = subprocess.check_output([const.TERRAFORM_BIN, 'output'])
 
         lustre_node_info = result.splitlines()
@@ -210,6 +208,7 @@ class Provisioner(object):
             else:
                 self._error("The node info is not correct.")
 
+        # Generate the NODE_INFO, which will be used in the future process
         with open(const.NODE_INFO, 'w+') as node_conf:
             node_conf.write(client01_hostname + ' ' + client01_ip + ' ' + const.CLIENT + '\n')
             node_conf.write(client02_hostname + ' ' + client02_ip + ' ' + const.CLIENT + '\n')
@@ -268,6 +267,17 @@ class Provisioner(object):
             self._error("Cluster node count is not right")
             return False
 
+    def clean_node_info(self):
+        p = subprocess.Popen(['rm', '-rf', const.NODE_INFO],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.realtime_output(p)
+        if p.returncode == 0:
+            self._debug('Terraform apply success')
+            return True
+        else:
+            self._error('Terraform apply failed')
+            return False
+
     #
     # The main process
     # For stablity, we can set provision_new to False, and then set the terraform dir
@@ -282,12 +292,11 @@ class Provisioner(object):
         else:
             self.tf_conf_dir = const.TERRAFORM_CONF_DIR + const.TERRAFORM_EXIST_CONF
 
+        self.clean_node_info()
         tf_return = self.terraform_apply()
-
         if tf_return:
-            self.write_to_file()
+            self.gen_node_info()
         else:
-            self._error("Terraform apply process failed")
             return False
 
         # check the file is there
@@ -296,7 +305,8 @@ class Provisioner(object):
                 if not provision_new:
                     self._debug("Does not provision new instances, we need to reinstall Lustre from the repo")
                     return self.node_operate()
-                return True
+                else:
+                    return True
             else:
                 self._error("The node_check is failed")
                 return False

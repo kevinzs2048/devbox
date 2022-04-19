@@ -15,11 +15,9 @@ class Node(object):
         self.ssh_client = self.ssh_connection
 
     def _debug(self, msg, *args):
-        """_"""
         self.logger.debug(msg, *args)
 
     def _error(self, msg, *args):
-        """_"""
         self.logger.error(msg, *args)
 
     def ssh_connection(self):
@@ -35,6 +33,7 @@ class Node(object):
 
     def ssh_close(self):
         self.ssh_client.close()
+
     def ssh_exec(self, cmd):
         # Test SSH connection
         stdin, stdout, stderr = self.ssh_client.exec_command(cmd)
